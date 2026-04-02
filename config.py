@@ -22,6 +22,8 @@ class Config:
     panel_pass: str
     panel_verify_ssl: bool
 
+    api_prefix: str  # "/panel" for newer 3x-ui, "/xui" for older
+
     port_range_start: int
     port_range_end: int
 
@@ -40,6 +42,7 @@ def load_config() -> Config:
         panel_user=_require("PANEL_USER"),
         panel_pass=_require("PANEL_PASS"),
         panel_verify_ssl=os.getenv("PANEL_VERIFY_SSL", "false").lower() == "true",
+        api_prefix=os.getenv("API_PREFIX", "/panel"),
         port_range_start=int(os.getenv("PORT_RANGE_START", "30000")),
         port_range_end=int(os.getenv("PORT_RANGE_END", "40000")),
         db_path=os.getenv("DB_PATH", "/app/data/bot.db"),

@@ -28,6 +28,7 @@ panel = PanelClient(
     username=config.panel_user,
     password=config.panel_pass,
     verify_ssl=config.panel_verify_ssl,
+    api_prefix=config.api_prefix,
 )
 
 # ---------------------------------------------------------------------------

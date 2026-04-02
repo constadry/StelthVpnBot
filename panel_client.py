@@ -91,11 +91,12 @@ class PanelClient:
     never holds stale cookies or dangling TCP connections between requests.
     """
 
-    def __init__(self, base_url: str, username: str, password: str, verify_ssl: bool = False):
+    def __init__(self, base_url: str, username: str, password: str, verify_ssl: bool = False, api_prefix: str = "/panel"):
         self._base_url = base_url
         self._username = username
         self._password = password
         self._verify_ssl = verify_ssl
+        self._api_prefix = api_prefix.rstrip("/")
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -110,30 +111,47 @@ class PanelClient:
             f"{self._base_url}/login",
             json={"username": self._username, "password": self._password},
         )
-        data = await resp.json()
+        raw = await resp.text()
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            logger.error("Login — non-JSON response (HTTP %s):\n%s", resp.status, raw[:500])
+            raise PanelError(
+                f"Login returned non-JSON (HTTP {resp.status}). "
+                "Check PANEL_URL and panel availability."
+            )
         if not data.get("success"):
             raise PanelError(f"Login failed: {data.get('msg', 'unknown error')}")
+
+    async def _parse_response(self, resp: aiohttp.ClientResponse, label: str) -> Any:
+        raw = await resp.text()
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            logger.error("%s — non-JSON response (HTTP %s):\n%s", label, resp.status, raw[:500])
+            raise PanelError(
+                f"{label} returned non-JSON (HTTP {resp.status}). "
+                "Check PANEL_URL in .env and panel logs."
+            )
+        if not data.get("success"):
+            logger.error("%s failed: %s", label, data.get("msg"))
+            raise PanelError(f"{label} failed: {data.get('msg')}")
+        return data.get("obj")
 
     async def _get(self, path: str) -> Any:
         async with self._session() as session:
             await self._login(session)
-            resp = await session.get(f"{self._base_url}{path}")
-            data = await resp.json()
-            if not data.get("success"):
-                raise PanelError(f"GET {path} failed: {data.get('msg')}")
-            return data.get("obj")
+            resp = await session.get(f"{self._base_url}{self._api_prefix}{path}")
+            return await self._parse_response(resp, f"GET {path}")
 
     async def _post(self, path: str, payload: Any) -> Any:
         async with self._session() as session:
             await self._login(session)
             resp = await session.post(
-                f"{self._base_url}{path}",
+                f"{self._base_url}{self._api_prefix}{path}",
                 json=payload,
             )
-            data = await resp.json()
-            if not data.get("success"):
-                raise PanelError(f"POST {path} failed: {data.get('msg')}")
-            return data.get("obj")
+            return await self._parse_response(resp, f"POST {path}")
 
     # ------------------------------------------------------------------
     # Public API
