@@ -1,11 +1,4 @@
 {
-  "_comment": "Замени этот файл реальными данными из своего inbound'а в 3x-ui.",
-  "_placeholders": {
-    "{{PORT}}": "будет подставлен уникальный порт",
-    "{{TAG}}": "будет подставлен тег вида user-<telegram_id>",
-    "{{CLIENT_UUID}}": "будет подставлен сгенерированный UUID",
-    "{{EMAIL}}": "будет подставлен tg_<telegram_id>"
-  },
   "up": 0,
   "down": 0,
   "total": 0,
@@ -15,8 +8,8 @@
   "listen": "",
   "port": "{{PORT}}",
   "protocol": "vless",
-  "settings": "{\"clients\":[{\"id\":\"{{CLIENT_UUID}}\",\"flow\":\"xtls-rprx-vision\",\"email\":\"{{EMAIL}}\",\"limitIp\":0,\"totalGB\":0,\"expiryTime\":0,\"enable\":true,\"tgId\":\"\",\"subId\":\"\"}],\"decryption\":\"none\",\"fallbacks\":[]}",
-  "streamSettings": "{\"network\":\"tcp\",\"security\":\"reality\",\"realitySettings\":{\"show\":false,\"dest\":\"YOUR_SNI_DOMAIN:443\",\"xver\":0,\"serverNames\":[\"YOUR_SNI_DOMAIN\"],\"privateKey\":\"YOUR_PRIVATE_KEY\",\"shortIds\":[\"YOUR_SHORT_ID\"],\"publicKey\":\"YOUR_PUBLIC_KEY\",\"fingerprint\":\"chrome\",\"spiderX\":\"/\"},\"tcpSettings\":{\"acceptProxyProtocol\":false,\"header\":{\"type\":\"none\"}}}",
-  "sniffing": "{\"enabled\":true,\"destOverride\":[\"http\",\"tls\",\"quic\",\"fakedns\"]}",
+  "settings": "{\"clients\":[{\"comment\":\"\",\"email\":\"{{EMAIL}}\",\"enable\":true,\"expiryTime\":0,\"flow\":\"xtls-rprx-vision\",\"id\":\"{{CLIENT_UUID}}\",\"limitIp\":0,\"reset\":0,\"subId\":\"{{SUB_ID}}\",\"tgId\":0,\"totalGB\":0}],\"decryption\":\"none\",\"encryption\":\"none\"}",
+  "streamSettings": "{\"network\":\"tcp\",\"security\":\"reality\",\"externalProxy\":[],\"realitySettings\":{\"show\":false,\"xver\":0,\"target\":\"{{TARGET}}\",\"serverNames\":[\"{{SNI}}\"],\"privateKey\":\"0ND3g5KvuixNHrpaQ1hjBLYutrcAJxWT_KolGW9ZpVo\",\"minClientVer\":\"\",\"maxClientVer\":\"\",\"maxTimediff\":0,\"shortIds\":[\"97b8c2247f33dc08\",\"7ff4debd5929\",\"a73f5fd146\",\"52e5299b\",\"c4f10f\",\"eead9dc683f948\",\"c491\",\"a6\"],\"mldsa65Seed\":\"\",\"settings\":{\"publicKey\":\"a57M5kkj0QBZyLx0YFzCv0lHUGODi4I-PCe8DOJHPUA\",\"fingerprint\":\"chrome\",\"serverName\":\"\",\"spiderX\":\"/\",\"mldsa65Verify\":\"\"}},\"tcpSettings\":{\"acceptProxyProtocol\":false,\"header\":{\"type\":\"none\"}}}",
+  "sniffing": "{\"enabled\":false,\"destOverride\":[\"http\",\"tls\",\"quic\",\"fakedns\"],\"metadataOnly\":false,\"routeOnly\":false}",
   "tag": "{{TAG}}"
 }

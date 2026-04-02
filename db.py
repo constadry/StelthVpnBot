@@ -45,6 +45,7 @@ async def init_db() -> None:
                 inbound_id   INTEGER NOT NULL,
                 port         INTEGER NOT NULL UNIQUE,
                 client_uuid  TEXT NOT NULL,
+                sub_id       TEXT NOT NULL DEFAULT '',
                 created_at   TEXT NOT NULL DEFAULT (datetime('now'))
             )
         """)
@@ -162,12 +163,13 @@ async def save_inbound(
     inbound_id: int,
     port: int,
     client_uuid: str,
+    sub_id: str = "",
 ) -> None:
     async with aiosqlite.connect(_db_path) as db:
         await db.execute("""
-            INSERT OR REPLACE INTO inbounds (telegram_id, inbound_id, port, client_uuid)
-            VALUES (?, ?, ?, ?)
-        """, (telegram_id, inbound_id, port, client_uuid))
+            INSERT OR REPLACE INTO inbounds (telegram_id, inbound_id, port, client_uuid, sub_id)
+            VALUES (?, ?, ?, ?, ?)
+        """, (telegram_id, inbound_id, port, client_uuid, sub_id))
         await db.commit()
 
 

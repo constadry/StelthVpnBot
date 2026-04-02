@@ -1,5 +1,7 @@
 import asyncio
 import logging
+import random
+import string
 import uuid
 from typing import Optional
 
@@ -38,6 +40,11 @@ def is_admin(user_id: int) -> bool:
 
 def _user_tag(telegram_id: int) -> str:
     return f"user-{telegram_id}"
+
+
+def _gen_sub_id(length: int = 16) -> str:
+    """Random alphanumeric subId matching 3x-ui format."""
+    return "".join(random.choices(string.ascii_lowercase + string.digits, k=length))
 
 
 async def _pick_free_port() -> int:
@@ -108,6 +115,7 @@ async def cmd_getlink(message: types.Message):
     try:
         port = await _pick_free_port()
         client_uuid = str(uuid.uuid4())
+        sub_id = _gen_sub_id()
         email = f"tg_{uid}"
         tag = _user_tag(uid)
 
@@ -116,6 +124,7 @@ async def cmd_getlink(message: types.Message):
             tag=tag,
             client_uuid=client_uuid,
             email=email,
+            sub_id=sub_id,
         )
 
         # 3x-ui returns the created inbound object; fall back to fetching by tag
@@ -135,6 +144,7 @@ async def cmd_getlink(message: types.Message):
             inbound_id=inbound_id,
             port=port,
             client_uuid=client_uuid,
+            sub_id=sub_id,
         )
 
         record = await db.get_user_inbound(uid)
@@ -200,7 +210,7 @@ async def cmd_sub(message: types.Message):
     sub_link = PanelClient.build_sub_link(
         panel_base_url=config.panel_url,
         sub_port=2096,
-        client_uuid=record["client_uuid"],
+        sub_id=record["sub_id"],
     )
 
     await message.answer(

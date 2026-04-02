@@ -1,7 +1,8 @@
-import copy
+import asyncio
 import json
 import logging
-import uuid
+import random
+import time
 from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import quote
@@ -11,6 +12,72 @@ import aiohttp
 logger = logging.getLogger(__name__)
 
 TEMPLATE_PATH = Path(__file__).parent / "inbound_template.json"
+WHITELIST_URL = "https://raw.githubusercontent.com/hxehex/russia-mobile-internet-whitelist/main/whitelist.txt"
+WHITELIST_TTL = 3600  # seconds
+
+
+class WhitelistCache:
+    """Fetches and caches the SNI whitelist from GitHub.
+
+    Refreshes automatically after TTL expires so the bot always has
+    a fresh list without blocking on every inbound creation.
+    """
+
+    def __init__(self, url: str = WHITELIST_URL, ttl: int = WHITELIST_TTL):
+        self._url = url
+        self._ttl = ttl
+        self._domains: list[str] = []
+        self._fetched_at: float = 0.0
+        self._lock = asyncio.Lock()
+
+    def _is_stale(self) -> bool:
+        return time.monotonic() - self._fetched_at > self._ttl
+
+    @staticmethod
+    def _parse(text: str) -> list[str]:
+        domains = []
+        for line in text.splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and "." in line:
+                domains.append(line)
+        return domains
+
+    async def get_domains(self) -> list[str]:
+        if self._domains and not self._is_stale():
+            return self._domains
+
+        async with self._lock:
+            # Double-check after acquiring lock
+            if self._domains and not self._is_stale():
+                return self._domains
+
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(self._url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                        resp.raise_for_status()
+                        text = await resp.text()
+                domains = self._parse(text)
+                if domains:
+                    self._domains = domains
+                    self._fetched_at = time.monotonic()
+                    logger.info("Whitelist updated: %d domains loaded", len(domains))
+                else:
+                    logger.warning("Whitelist is empty, keeping previous list")
+            except Exception as e:
+                logger.error("Failed to fetch whitelist: %s", e)
+                if not self._domains:
+                    # Hard fallback if we've never loaded successfully
+                    self._domains = ["sun9-77.userapi.com"]
+
+        return self._domains
+
+    async def random_domain(self) -> str:
+        domains = await self.get_domains()
+        return random.choice(domains)
+
+
+# Module-level singleton — shared across all panel operations
+whitelist = WhitelistCache()
 
 
 class PanelError(Exception):
@@ -79,7 +146,15 @@ class PanelClient:
         result = await self._get(f"/xui/inbound/get/{inbound_id}")
         return result
 
-    async def create_inbound(self, port: int, tag: str, client_uuid: str, email: str) -> dict:
+    async def create_inbound(
+        self,
+        port: int,
+        tag: str,
+        client_uuid: str,
+        email: str,
+        sub_id: str = "",
+        sni: Optional[str] = None,
+    ) -> dict:
         """Create a new inbound based on inbound_template.json.
 
         Substitutes placeholders:
@@ -87,12 +162,21 @@ class PanelClient:
             {{TAG}}          → unique tag string
             {{CLIENT_UUID}}  → UUID for the VLESS client
             {{EMAIL}}        → client email / remark
+            {{SUB_ID}}       → subscription ID for /sub/ link
+            {{SNI}}          → SNI domain (random from whitelist if not provided)
+            {{TARGET}}       → SNI domain with :443 suffix (for Reality dest)
         """
         if not TEMPLATE_PATH.exists():
             raise PanelError(
                 "inbound_template.json not found. "
                 "Please create it based on your existing inbound."
             )
+
+        if sni is None:
+            sni = await whitelist.random_domain()
+
+        target = f"{sni}:443"
+        logger.info("Creating inbound port=%d tag=%s sni=%s", port, tag, sni)
 
         raw = TEMPLATE_PATH.read_text(encoding="utf-8")
         raw = (
@@ -101,6 +185,9 @@ class PanelClient:
             .replace("{{TAG}}", tag)
             .replace("{{CLIENT_UUID}}", client_uuid)
             .replace("{{EMAIL}}", email)
+            .replace("{{SUB_ID}}", sub_id)
+            .replace("{{SNI}}", sni)
+            .replace("{{TARGET}}", target)
         )
 
         payload = json.loads(raw)
@@ -124,8 +211,8 @@ class PanelClient:
     ) -> str:
         """Build a vless:// URI from inbound streamSettings.
 
-        Works for Reality over TCP (the main inbound type used here).
-        Falls back gracefully if some fields are missing.
+        Supports the 3x-ui layout where publicKey/fingerprint are nested
+        inside realitySettings.settings (newer panel versions).
         """
         stream: dict = {}
         try:
@@ -137,12 +224,13 @@ class PanelClient:
         security = stream.get("security", "reality")
 
         reality = stream.get("realitySettings") or {}
-        public_key = reality.get("publicKey", "")
+        # Newer 3x-ui: publicKey and fingerprint are inside reality.settings
+        reality_inner = reality.get("settings") or {}
+
+        public_key = reality_inner.get("publicKey") or reality.get("publicKey", "")
+        fingerprint = reality_inner.get("fingerprint") or reality.get("fingerprint", "chrome")
         short_id = (reality.get("shortIds") or [""])[0]
         sni = (reality.get("serverNames") or [""])[0]
-
-        tls = stream.get("tlsSettings") or {}
-        fingerprint = (tls.get("fingerprint") or reality.get("fingerprint") or "chrome")
 
         params = {
             "type": network,
@@ -161,7 +249,10 @@ class PanelClient:
         return f"vless://{client_uuid}@{server_ip}:{port}?{query}#{encoded_remark}"
 
     @staticmethod
-    def build_sub_link(panel_base_url: str, sub_port: int, client_uuid: str) -> str:
-        """Subscription link understood by Happ/Hiddify/v2rayN."""
+    def build_sub_link(panel_base_url: str, sub_port: int, sub_id: str) -> str:
+        """Subscription link understood by Happ/Hiddify/v2rayN.
+
+        Uses the client's subId (not UUID) as 3x-ui expects.
+        """
         host = panel_base_url.split("//")[-1].split("/")[0].split(":")[0]
-        return f"http://{host}:{sub_port}/sub/{client_uuid}"
+        return f"http://{host}:{sub_port}/sub/{sub_id}"
