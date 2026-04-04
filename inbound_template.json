@@ -6,7 +6,7 @@
   "enable": true,
   "expiryTime": 0,
   "listen": "",
-  "port": "{{PORT}}",
+  "port": {{PORT}},
   "protocol": "vless",
   "settings": "{\"clients\":[{\"comment\":\"\",\"email\":\"{{EMAIL}}\",\"enable\":true,\"expiryTime\":0,\"flow\":\"xtls-rprx-vision\",\"id\":\"{{CLIENT_UUID}}\",\"limitIp\":0,\"reset\":0,\"subId\":\"{{SUB_ID}}\",\"tgId\":0,\"totalGB\":0}],\"decryption\":\"none\",\"encryption\":\"none\"}",
   "streamSettings": "{\"network\":\"tcp\",\"security\":\"reality\",\"externalProxy\":[],\"realitySettings\":{\"show\":false,\"xver\":0,\"target\":\"{{TARGET}}\",\"serverNames\":[\"{{SNI}}\"],\"privateKey\":\"0ND3g5KvuixNHrpaQ1hjBLYutrcAJxWT_KolGW9ZpVo\",\"minClientVer\":\"\",\"maxClientVer\":\"\",\"maxTimediff\":0,\"shortIds\":[\"97b8c2247f33dc08\",\"7ff4debd5929\",\"a73f5fd146\",\"52e5299b\",\"c4f10f\",\"eead9dc683f948\",\"c491\",\"a6\"],\"mldsa65Seed\":\"\",\"settings\":{\"publicKey\":\"a57M5kkj0QBZyLx0YFzCv0lHUGODi4I-PCe8DOJHPUA\",\"fingerprint\":\"chrome\",\"serverName\":\"\",\"spiderX\":\"/\",\"mldsa65Verify\":\"\"}},\"tcpSettings\":{\"acceptProxyProtocol\":false,\"header\":{\"type\":\"none\"}}}",
