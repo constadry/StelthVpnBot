@@ -158,12 +158,13 @@ class PanelClient:
     # ------------------------------------------------------------------
 
     async def get_inbounds(self) -> list[dict]:
-        # Full path = PANEL_URL + API_PREFIX + /inbound/...
-        # e.g. .../constadry/panel/inbound/list (new) or .../xui/inbound/list (old)
-        return await self._get("/inbound/list") or []
+        # Full path = PANEL_URL + API_PREFIX + /inbounds/...
+        # New 3x-ui (v2+): API_PREFIX=/panel/api  → .../panel/api/inbounds/list
+        # Old 3x-ui:        API_PREFIX=/xui        → .../xui/inbound/list  (singular)
+        return await self._get("/inbounds/list") or []
 
     async def get_inbound(self, inbound_id: int) -> dict:
-        result = await self._get(f"/inbound/get/{inbound_id}")
+        result = await self._get(f"/inbounds/get/{inbound_id}")
         return result
 
     async def create_inbound(
@@ -211,11 +212,11 @@ class PanelClient:
         )
 
         payload = json.loads(raw)
-        result = await self._post("/inbound/add", payload)
+        result = await self._post("/inbounds/add", payload)
         return result
 
     async def delete_inbound(self, inbound_id: int) -> None:
-        await self._post(f"/inbound/del/{inbound_id}", {})
+        await self._post(f"/inbounds/del/{inbound_id}", {})
 
     # ------------------------------------------------------------------
     # VLESS link builder
