@@ -145,12 +145,11 @@ class PanelClient:
             return await self._parse_response(resp, f"GET {path}")
 
     async def _post(self, path: str, payload: Any) -> Any:
+        url = f"{self._base_url}{self._api_prefix}{path}"
         async with self._session() as session:
             await self._login(session)
-            resp = await session.post(
-                f"{self._base_url}{self._api_prefix}{path}",
-                json=payload,
-            )
+            logger.info("POST %s", url)
+            resp = await session.post(url, json=payload)
             return await self._parse_response(resp, f"POST {path}")
 
     # ------------------------------------------------------------------
