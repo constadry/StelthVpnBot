@@ -144,12 +144,26 @@ class PanelClient:
             resp = await session.get(f"{self._base_url}{self._api_prefix}{path}")
             return await self._parse_response(resp, f"GET {path}")
 
+    @staticmethod
+    def _to_form(payload: dict) -> dict:
+        """Convert dict to flat string values for x-www-form-urlencoded."""
+        result = {}
+        for k, v in payload.items():
+            if isinstance(v, bool):
+                result[k] = "true" if v else "false"
+            elif v is None:
+                result[k] = ""
+            else:
+                result[k] = str(v)
+        return result
+
     async def _post(self, path: str, payload: Any) -> Any:
         url = f"{self._base_url}{self._api_prefix}{path}"
+        headers = {"X-Requested-With": "XMLHttpRequest"}
         async with self._session() as session:
             await self._login(session)
             logger.info("POST %s", url)
-            resp = await session.post(url, json=payload)
+            resp = await session.post(url, data=self._to_form(payload), headers=headers)
             return await self._parse_response(resp, f"POST {path}")
 
     # ------------------------------------------------------------------
