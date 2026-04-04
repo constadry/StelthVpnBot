@@ -8,6 +8,8 @@ services:
     volumes:
       # SQLite DB lives on the host — survives container restarts/rebuilds
       - ./data:/app/data
+      # Mount source code — changes apply after container restart, no rebuild needed
+      - .:/app
 
     # Optional: keep logs manageable
     logging:
