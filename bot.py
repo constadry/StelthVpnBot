@@ -8,6 +8,7 @@ from typing import Optional
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import Command
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 import db
 from config import load_config
@@ -34,6 +35,9 @@ panel = PanelClient(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+ADMIN_LINK_LIMIT = 20
+
 
 def is_admin(user_id: int) -> bool:
     return user_id in config.admin_ids
@@ -83,20 +87,135 @@ async def register_user_middleware(handler, message: types.Message, data: dict):
 
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
-    approved = await db.is_approved(message.from_user.id)
+    user = message.from_user
+    approved = await db.is_approved(user.id)
     if approved:
-        text = (
-            "Привет! Я выдаю персональные VPN-ссылки.\n\n"
-            "Команды:\n"
-            "/getlink — получить VLESS-ссылку подключения\n"
-            "/sub — получить ссылку-подписку (все серверы сразу)\n"
+        await message.answer(
+            "Привет! Используй /getlink чтобы получить свою VPN-ссылку."
         )
-    else:
-        text = (
-            "Привет! Твой запрос зарегистрирован.\n"
-            "Дождись одобрения от администратора."
+        return
+
+    await message.answer(
+        "Привет! Твоя заявка отправлена администратору.\n"
+        "Ссылка придёт сюда как только её выдадут."
+    )
+
+    name = user.full_name or user.username or str(user.id)
+    username_str = f" (@{user.username})" if user.username else ""
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="Выдать ссылку", callback_data=f"issue:{user.id}")
+
+    for admin_id in config.admin_ids:
+        try:
+            await bot.send_message(
+                admin_id,
+                f"Новая заявка на VPN:\n<b>{name}</b>{username_str} — <code>{user.id}</code>",
+                parse_mode="HTML",
+                reply_markup=kb.as_markup(),
+            )
+        except Exception:
+            pass
+
+
+# ---------------------------------------------------------------------------
+# Admin callback: issue link button
+# ---------------------------------------------------------------------------
+
+@dp.callback_query(F.data.startswith("issue:"))
+async def cb_issue_link(callback: types.CallbackQuery):
+    admin_id = callback.from_user.id
+    if not is_admin(admin_id):
+        await callback.answer("Нет доступа.", show_alert=True)
+        return
+
+    target_id = int(callback.data.split(":")[1])
+
+    issued = await db.count_issued_by_admin(admin_id)
+    if issued >= ADMIN_LINK_LIMIT:
+        await callback.answer(
+            f"Достигнут лимит: {ADMIN_LINK_LIMIT} ссылок.", show_alert=True
         )
-    await message.answer(text)
+        return
+
+    await callback.answer("Создаю ссылку...")
+    await callback.message.edit_reply_markup(reply_markup=None)
+
+    existing = await db.get_user_inbound(target_id)
+    if existing:
+        await _deliver_link(target_id, existing)
+        await callback.message.answer(f"Ссылка уже была — отправил повторно пользователю {target_id}.")
+        return
+
+    try:
+        port = await _pick_free_port()
+        client_uuid = str(uuid.uuid4())
+        sub_id = _gen_sub_id()
+        email = f"tg_{target_id}"
+        tag = _user_tag(target_id)
+
+        inbound_data = await panel.create_inbound(
+            port=port, tag=tag, client_uuid=client_uuid,
+            email=email, sub_id=sub_id,
+        )
+
+        inbound_id = None
+        if isinstance(inbound_data, dict):
+            inbound_id = inbound_data.get("id")
+        if inbound_id is None:
+            inbound_id = await _find_inbound_id_by_tag(tag)
+        if inbound_id is None:
+            await callback.message.answer("Не удалось получить ID inbound-а.")
+            return
+
+        await db.approve_user(target_id)
+        await db.save_inbound(
+            telegram_id=target_id,
+            inbound_id=inbound_id,
+            port=port,
+            client_uuid=client_uuid,
+            sub_id=sub_id,
+            issued_by=admin_id,
+        )
+
+        record = await db.get_user_inbound(target_id)
+        await _deliver_link(target_id, record)
+        await callback.message.answer(
+            f"Ссылка выдана пользователю {target_id}. "
+            f"Выдано тобой: {issued + 1}/{ADMIN_LINK_LIMIT}."
+        )
+
+    except PanelError as e:
+        logger.error("Panel error issuing link for %s: %s", target_id, e)
+        await callback.message.answer(f"Ошибка панели: {e}")
+    except Exception:
+        logger.exception("Unexpected error issuing link for %s", target_id)
+        await callback.message.answer("Непредвиденная ошибка.")
+
+
+async def _deliver_link(user_id: int, record: dict) -> None:
+    """Send VLESS link directly to the user."""
+    server_ip = config.panel_url.split("//")[-1].split("/")[0].split(":")[0]
+    try:
+        inbound_data = await panel.get_inbound(record["inbound_id"])
+    except PanelError:
+        inbound_data = {}
+
+    vless = PanelClient.build_vless_link(
+        server_ip=server_ip,
+        port=record["port"],
+        client_uuid=record["client_uuid"],
+        inbound_data=inbound_data,
+        remark="MyVPN",
+    )
+    try:
+        await bot.send_message(
+            user_id,
+            f"Твоя VPN-ссылка готова!\n\n`{vless}`\n\nИмпортируй в Happ / Hiddify / v2rayN.",
+            parse_mode="Markdown",
+        )
+    except Exception as e:
+        logger.error("Cannot deliver link to %s: %s", user_id, e)
 
 
 # ---------------------------------------------------------------------------
@@ -113,7 +232,7 @@ async def cmd_getlink(message: types.Message):
 
     existing = await db.get_user_inbound(uid)
     if existing:
-        await _send_vless_link(message, existing)
+        await _deliver_link(uid, existing)
         return
 
     await message.answer("Создаю твой персональный сервер, подожди секунду...")
@@ -154,7 +273,7 @@ async def cmd_getlink(message: types.Message):
         )
 
         record = await db.get_user_inbound(uid)
-        await _send_vless_link(message, record)
+        await _deliver_link(uid, record)
 
     except PanelError as e:
         logger.error("Panel error for user %s: %s", uid, e)
@@ -170,30 +289,6 @@ async def _find_inbound_id_by_tag(tag: str) -> Optional[int]:
         if ib.get("tag") == tag:
             return ib.get("id")
     return None
-
-
-async def _send_vless_link(message: types.Message, record: dict) -> None:
-    server_ip = config.panel_url.split("//")[-1].split("/")[0].split(":")[0]
-
-    try:
-        inbound_data = await panel.get_inbound(record["inbound_id"])
-    except PanelError as e:
-        logger.error("Cannot fetch inbound %s: %s", record["inbound_id"], e)
-        inbound_data = {}
-
-    vless = PanelClient.build_vless_link(
-        server_ip=server_ip,
-        port=record["port"],
-        client_uuid=record["client_uuid"],
-        inbound_data=inbound_data,
-        remark="MyVPN",
-    )
-
-    await message.answer(
-        f"Твоя VLESS-ссылка:\n\n`{vless}`\n\n"
-        "Импортируй в Happ / Hiddify / v2rayN.",
-        parse_mode="Markdown",
-    )
 
 
 # ---------------------------------------------------------------------------

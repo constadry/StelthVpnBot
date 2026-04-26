@@ -50,13 +50,16 @@ async def init_db() -> None:
             )
         """)
 
-        # Migration: add sub_id if missing (DB created before this column existed)
-        try:
-            await db.execute("ALTER TABLE inbounds ADD COLUMN sub_id TEXT NOT NULL DEFAULT ''")
-            await db.commit()
-            logger.info("Migration: added sub_id column to inbounds")
-        except Exception:
-            pass  # column already exists
+        # Migrations for columns added after initial release
+        for migration in [
+            "ALTER TABLE inbounds ADD COLUMN sub_id TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE inbounds ADD COLUMN issued_by INTEGER",
+        ]:
+            try:
+                await db.execute(migration)
+                await db.commit()
+            except Exception:
+                pass  # column already exists
 
         await db.commit()
     logger.info("Database initialised at %s", _db_path)
@@ -172,13 +175,23 @@ async def save_inbound(
     port: int,
     client_uuid: str,
     sub_id: str = "",
+    issued_by: Optional[int] = None,
 ) -> None:
     async with aiosqlite.connect(_db_path) as db:
         await db.execute("""
-            INSERT OR REPLACE INTO inbounds (telegram_id, inbound_id, port, client_uuid, sub_id)
-            VALUES (?, ?, ?, ?, ?)
-        """, (telegram_id, inbound_id, port, client_uuid, sub_id))
+            INSERT OR REPLACE INTO inbounds (telegram_id, inbound_id, port, client_uuid, sub_id, issued_by)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (telegram_id, inbound_id, port, client_uuid, sub_id, issued_by))
         await db.commit()
+
+
+async def count_issued_by_admin(admin_id: int) -> int:
+    async with aiosqlite.connect(_db_path) as db:
+        async with db.execute(
+            "SELECT COUNT(*) FROM inbounds WHERE issued_by = ?", (admin_id,)
+        ) as cur:
+            row = await cur.fetchone()
+            return row[0] if row else 0
 
 
 async def get_used_ports() -> set[int]:
