@@ -292,6 +292,20 @@ async def _find_inbound_id_by_tag(tag: str) -> Optional[int]:
     return None
 
 
+async def _find_inbound_id_by_email(email: str) -> Optional[int]:
+    import json as _json
+    inbounds = await panel.get_inbounds()
+    for ib in inbounds:
+        try:
+            settings = _json.loads(ib.get("settings") or "{}")
+            for client in settings.get("clients", []):
+                if client.get("email") == email:
+                    return ib.get("id")
+        except Exception:
+            pass
+    return None
+
+
 # ---------------------------------------------------------------------------
 # /sub — subscription link
 # ---------------------------------------------------------------------------
@@ -367,7 +381,9 @@ async def cmd_fix(message: types.Message):
 
     inbound_id = await _find_inbound_id_by_tag(tag)
     if inbound_id is None:
-        await message.answer(f"Inbound с тегом {tag} не найден на панели.")
+        inbound_id = await _find_inbound_id_by_email(f"tg_{target_id}")
+    if inbound_id is None:
+        await message.answer(f"Inbound с тегом {tag} или email tg_{target_id} не найден на панели.")
         return
 
     try:
