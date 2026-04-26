@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import random
 import string
@@ -348,6 +349,49 @@ async def cmd_approve(message: types.Message):
             f"Пользователь {target_id} не найден в базе.\n"
             "Он должен сначала написать боту /start."
         )
+
+
+@dp.message(Command("fix"))
+async def cmd_fix(message: types.Message):
+    """Find existing panel inbound by tag and save it to DB."""
+    if not is_admin(message.from_user.id):
+        return
+
+    parts = message.text.split()
+    if len(parts) != 2 or not parts[1].lstrip("-").isdigit():
+        await message.answer("Использование: /fix <telegram_id>")
+        return
+
+    target_id = int(parts[1])
+    tag = _user_tag(target_id)
+
+    inbound_id = await _find_inbound_id_by_tag(tag)
+    if inbound_id is None:
+        await message.answer(f"Inbound с тегом {tag} не найден на панели.")
+        return
+
+    try:
+        inbound_data = await panel.get_inbound(inbound_id)
+    except PanelError as e:
+        await message.answer(f"Ошибка при получении inbound: {e}")
+        return
+
+    port = inbound_data.get("port", 0)
+    settings = json.loads(inbound_data.get("settings") or "{}")
+    clients = settings.get("clients", [{}])
+    client_uuid = clients[0].get("id", "") if clients else ""
+    sub_id = clients[0].get("subId", "") if clients else ""
+
+    await db.approve_user(target_id)
+    await db.save_inbound(
+        telegram_id=target_id,
+        inbound_id=inbound_id,
+        port=port,
+        client_uuid=client_uuid,
+        sub_id=sub_id,
+        issued_by=message.from_user.id,
+    )
+    await message.answer(f"Готово. Inbound {inbound_id} (порт {port}) привязан к пользователю {target_id}.")
 
 
 @dp.message(Command("revoke"))
