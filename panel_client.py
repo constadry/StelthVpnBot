@@ -104,7 +104,9 @@ class PanelClient:
 
     def _session(self) -> aiohttp.ClientSession:
         connector = aiohttp.TCPConnector(ssl=self._verify_ssl)
-        return aiohttp.ClientSession(connector=connector)
+        # unsafe=True required for cookies on IP-address hosts (aiohttp drops them by default)
+        jar = aiohttp.CookieJar(unsafe=True)
+        return aiohttp.ClientSession(connector=connector, cookie_jar=jar)
 
     async def _login(self, session: aiohttp.ClientSession) -> None:
         resp = await session.post(
