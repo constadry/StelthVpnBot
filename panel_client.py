@@ -109,7 +109,7 @@ class PanelClient:
     async def _login(self, session: aiohttp.ClientSession) -> None:
         resp = await session.post(
             f"{self._base_url}/login",
-            json={"username": self._username, "password": self._password},
+            data={"username": self._username, "password": self._password},
         )
         raw = await resp.text()
         try:
@@ -122,6 +122,8 @@ class PanelClient:
             )
         if not data.get("success"):
             raise PanelError(f"Login failed: {data.get('msg', 'unknown error')}")
+        cookies = {c.key: c.value for c in session.cookie_jar}
+        logger.info("Login OK, cookies: %s", list(cookies.keys()))
 
     async def _parse_response(self, resp: aiohttp.ClientResponse, label: str) -> Any:
         raw = await resp.text()
