@@ -50,6 +50,11 @@ def _gen_sub_id(length: int = 16) -> str:
 
 async def _pick_free_port() -> int:
     used = await db.get_used_ports()
+    try:
+        inbounds = await panel.get_inbounds()
+        used |= {ib["port"] for ib in inbounds if ib.get("port")}
+    except PanelError:
+        pass
     for port in range(config.port_range_start, config.port_range_end + 1):
         if port not in used:
             return port
