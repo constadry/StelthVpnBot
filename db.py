@@ -50,6 +50,14 @@ async def init_db() -> None:
             )
         """)
 
+        # Migration: add sub_id if missing (DB created before this column existed)
+        try:
+            await db.execute("ALTER TABLE inbounds ADD COLUMN sub_id TEXT NOT NULL DEFAULT ''")
+            await db.commit()
+            logger.info("Migration: added sub_id column to inbounds")
+        except Exception:
+            pass  # column already exists
+
         await db.commit()
     logger.info("Database initialised at %s", _db_path)
 
