@@ -44,6 +44,10 @@ def is_admin(user_id: int) -> bool:
     return user_id in config.admin_ids
 
 
+async def is_staff(user_id: int) -> bool:
+    return is_admin(user_id) or await db.is_moderator(user_id)
+
+
 def _user_tag(telegram_id: int) -> str:
     return f"user-{telegram_id}"
 
@@ -107,10 +111,15 @@ async def cmd_start(message: types.Message):
     kb = InlineKeyboardBuilder()
     kb.button(text="Выдать ссылку", callback_data=f"issue:{user.id}")
 
-    for admin_id in config.admin_ids:
+    notify_ids = list(config.admin_ids)
+    for mod in await db.list_moderators():
+        if mod["telegram_id"] not in notify_ids:
+            notify_ids.append(mod["telegram_id"])
+
+    for staff_id in notify_ids:
         try:
             await bot.send_message(
-                admin_id,
+                staff_id,
                 f"Новая заявка на VPN:\n<b>{name}</b>{username_str} — <code>{user.id}</code>",
                 parse_mode="HTML",
                 reply_markup=kb.as_markup(),
@@ -126,7 +135,7 @@ async def cmd_start(message: types.Message):
 @dp.callback_query(F.data.startswith("issue:"))
 async def cb_issue_link(callback: types.CallbackQuery):
     admin_id = callback.from_user.id
-    if not is_admin(admin_id):
+    if not await is_staff(admin_id):
         await callback.answer("Нет доступа.", show_alert=True)
         return
 
@@ -445,6 +454,85 @@ async def cmd_list(message: types.Message):
         port_info = f"port={u['port']}" if u["port"] else "нет сервера"
         lines.append(f"{status} <code>{u['telegram_id']}</code> {name} — {port_info}")
 
+    await message.answer("\n".join(lines), parse_mode="HTML")
+
+
+@dp.message(Command("addmod"))
+async def cmd_addmod(message: types.Message):
+    if not is_admin(message.from_user.id):
+        return
+
+    parts = message.text.split()
+    if len(parts) != 2:
+        await message.answer("Использование: /addmod <telegram_id или @username>")
+        return
+
+    arg = parts[1]
+    if arg.startswith("@"):
+        username = arg.lstrip("@")
+        user_row = await db.get_user_by_username(username)
+        if not user_row:
+            await message.answer(f"Пользователь @{username} не найден в базе. Он должен написать боту /start.")
+            return
+        target_id = user_row["telegram_id"]
+        target_username = user_row["username"]
+    elif arg.lstrip("-").isdigit():
+        target_id = int(arg)
+        target_username = None
+    else:
+        await message.answer("Использование: /addmod <telegram_id или @username>")
+        return
+
+    if is_admin(target_id):
+        await message.answer("Этот пользователь уже является администратором.")
+        return
+
+    await db.add_moderator(target_id, target_username, message.from_user.id)
+    label = f"@{target_username}" if target_username else str(target_id)
+    await message.answer(f"Модератор {label} (<code>{target_id}</code>) добавлен.", parse_mode="HTML")
+
+    try:
+        await bot.send_message(target_id, "Тебе выданы права модератора. Теперь ты будешь получать заявки на VPN и сможешь выдавать ссылки.")
+    except Exception:
+        pass
+
+
+@dp.message(Command("removemod"))
+async def cmd_removemod(message: types.Message):
+    if not is_admin(message.from_user.id):
+        return
+
+    parts = message.text.split()
+    if len(parts) != 2 or not parts[1].lstrip("-").isdigit():
+        await message.answer("Использование: /removemod <telegram_id>")
+        return
+
+    target_id = int(parts[1])
+    ok = await db.remove_moderator(target_id)
+    if ok:
+        await message.answer(f"Модератор <code>{target_id}</code> удалён.", parse_mode="HTML")
+        try:
+            await bot.send_message(target_id, "Твои права модератора отозваны.")
+        except Exception:
+            pass
+    else:
+        await message.answer(f"Модератор с ID {target_id} не найден.")
+
+
+@dp.message(Command("mods"))
+async def cmd_mods(message: types.Message):
+    if not is_admin(message.from_user.id):
+        return
+
+    mods = await db.list_moderators()
+    if not mods:
+        await message.answer("Модераторов нет.")
+        return
+
+    lines = ["<b>Модераторы:</b>"]
+    for m in mods:
+        label = f"@{m['username']}" if m["username"] else "—"
+        lines.append(f"• <code>{m['telegram_id']}</code> {label} (добавил: {m['added_by']})")
     await message.answer("\n".join(lines), parse_mode="HTML")
 
 

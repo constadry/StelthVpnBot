@@ -50,6 +50,15 @@ async def init_db() -> None:
             )
         """)
 
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS moderators (
+                telegram_id  INTEGER PRIMARY KEY,
+                username     TEXT,
+                added_by     INTEGER NOT NULL,
+                created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+        """)
+
         # Migrations for columns added after initial release
         for migration in [
             "ALTER TABLE inbounds ADD COLUMN sub_id TEXT NOT NULL DEFAULT ''",
@@ -192,6 +201,59 @@ async def count_issued_by_admin(admin_id: int) -> int:
         ) as cur:
             row = await cur.fetchone()
             return row[0] if row else 0
+
+
+# ---------------------------------------------------------------------------
+# Moderators
+# ---------------------------------------------------------------------------
+
+async def add_moderator(telegram_id: int, username: Optional[str], added_by: int) -> None:
+    async with aiosqlite.connect(_db_path) as db:
+        await db.execute("""
+            INSERT OR REPLACE INTO moderators (telegram_id, username, added_by)
+            VALUES (?, ?, ?)
+        """, (telegram_id, username, added_by))
+        await db.commit()
+
+
+async def remove_moderator(telegram_id: int) -> bool:
+    async with aiosqlite.connect(_db_path) as db:
+        async with db.execute(
+            "SELECT telegram_id FROM moderators WHERE telegram_id = ?", (telegram_id,)
+        ) as cur:
+            if not await cur.fetchone():
+                return False
+        await db.execute("DELETE FROM moderators WHERE telegram_id = ?", (telegram_id,))
+        await db.commit()
+        return True
+
+
+async def list_moderators() -> list[dict]:
+    async with aiosqlite.connect(_db_path) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT telegram_id, username, added_by, created_at FROM moderators ORDER BY created_at DESC"
+        ) as cur:
+            rows = await cur.fetchall()
+            return [dict(r) for r in rows]
+
+
+async def is_moderator(telegram_id: int) -> bool:
+    async with aiosqlite.connect(_db_path) as db:
+        async with db.execute(
+            "SELECT telegram_id FROM moderators WHERE telegram_id = ?", (telegram_id,)
+        ) as cur:
+            return bool(await cur.fetchone())
+
+
+async def get_user_by_username(username: str) -> Optional[dict]:
+    async with aiosqlite.connect(_db_path) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT telegram_id, username, full_name FROM users WHERE username = ?", (username,)
+        ) as cur:
+            row = await cur.fetchone()
+            return dict(row) if row else None
 
 
 async def get_used_ports() -> set[int]:
