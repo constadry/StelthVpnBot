@@ -262,7 +262,7 @@ async def _issue_via_locations(target_id: int, issuer_id: int) -> tuple[bool, li
 async def _deliver_sub_link(user_id: int, sub_id: str) -> None:
     sub_link = PanelClient.build_sub_link(
         panel_base_url=config.panel_url,
-        sub_port=2096,
+        sub_port=config.sub_port,
         sub_id=sub_id,
     )
     try:
@@ -417,7 +417,7 @@ async def cmd_sub(message: types.Message):
 
     sub_link = PanelClient.build_sub_link(
         panel_base_url=config.panel_url,
-        sub_port=2096,
+        sub_port=config.sub_port,
         sub_id=sub_id,
     )
 

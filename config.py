@@ -30,6 +30,8 @@ class Config:
     db_path: str
     db_backup_path: str
 
+    sub_port: int
+
 
 def load_config() -> Config:
     admin_raw = _require("ADMIN_IDS")
@@ -47,4 +49,5 @@ def load_config() -> Config:
         port_range_end=int(os.getenv("PORT_RANGE_END", "40000")),
         db_path=os.getenv("DB_PATH", "/app/data/bot.db"),
         db_backup_path=os.getenv("DB_BACKUP_PATH", "/app/data/bot.db.bak"),
+        sub_port=int(os.getenv("SUB_PORT", "2096")),
     )
