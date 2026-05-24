@@ -221,8 +221,8 @@ async def _deliver_link(user_id: int, record: dict) -> None:
     try:
         await bot.send_message(
             user_id,
-            f"Твоя VPN-ссылка готова!\n\n`{vless}`\n\nИмпортируй в Happ / Hiddify / v2rayN.",
-            parse_mode="Markdown",
+            f"Твоя VPN-ссылка готова!\n\n<u>{vless}</u>\n\nИмпортируй в Happ / Hiddify / v2rayN.",
+            parse_mode="HTML",
         )
     except Exception as e:
         logger.error("Cannot deliver link to %s: %s", user_id, e)
