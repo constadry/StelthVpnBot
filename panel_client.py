@@ -325,4 +325,4 @@ class PanelClient:
         Uses the client's subId (not UUID) as 3x-ui expects.
         """
         host = panel_base_url.split("//")[-1].split("/")[0].split(":")[0]
-        return f"http://{host}:{sub_port}/sub/{sub_id}"
+        return f"https://{host}:{sub_port}/sub/{sub_id}"

@@ -289,7 +289,7 @@ async def _deliver_link(user_id: int, record: dict) -> None:
         port=record["port"],
         client_uuid=record["client_uuid"],
         inbound_data=inbound_data,
-        remark="MyVPN",
+        remark="StelthNet",
     )
     try:
         await bot.send_message(
