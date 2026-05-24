@@ -224,6 +224,10 @@ async def _deliver_link(user_id: int, record: dict) -> None:
             f"Твоя VPN-ссылка готова!\n\n<u>{vless}</u>\n\nИмпортируй в Happ / Hiddify / v2rayN.",
             parse_mode="HTML",
         )
+        await bot.send_message(
+            user_id,
+            "Если что-то не работает или есть вопросы — пиши в поддержку: @stealth_net_support_bot",
+        )
     except Exception as e:
         logger.error("Cannot deliver link to %s: %s", user_id, e)
 
