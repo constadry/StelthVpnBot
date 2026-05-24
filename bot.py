@@ -461,6 +461,35 @@ async def cmd_list(message: types.Message):
     await message.answer("\n".join(lines), parse_mode="HTML")
 
 
+@dp.message(Command("reissue_all"))
+async def cmd_reissue_all(message: types.Message):
+    if not is_admin(message.from_user.id):
+        return
+
+    users = await db.list_users_with_inbounds()
+    if not users:
+        await message.answer("Нет пользователей с inbound-ами.")
+        return
+
+    await message.answer(f"Начинаю рассылку новых ссылок — {len(users)} пользователей...")
+
+    ok = 0
+    fail = 0
+    for u in users:
+        try:
+            record = await db.get_user_inbound(u["telegram_id"])
+            await _deliver_link(u["telegram_id"], record)
+            ok += 1
+        except Exception:
+            logger.exception("reissue_all: failed for %s", u["telegram_id"])
+            fail += 1
+        await asyncio.sleep(0.1)  # не флудим Telegram
+
+    await message.answer(
+        f"Готово. Отправлено: {ok}, ошибок: {fail}."
+    )
+
+
 @dp.message(Command("addmod"))
 async def cmd_addmod(message: types.Message):
     if not is_admin(message.from_user.id):

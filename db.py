@@ -256,6 +256,20 @@ async def get_user_by_username(username: str) -> Optional[dict]:
             return dict(row) if row else None
 
 
+async def list_users_with_inbounds() -> list[dict]:
+    async with aiosqlite.connect(_db_path) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("""
+            SELECT u.telegram_id, u.username, u.full_name,
+                   i.inbound_id, i.port, i.client_uuid, i.sub_id
+            FROM users u
+            JOIN inbounds i ON i.telegram_id = u.telegram_id
+            ORDER BY i.created_at ASC
+        """) as cur:
+            rows = await cur.fetchall()
+            return [dict(r) for r in rows]
+
+
 async def get_used_ports() -> set[int]:
     async with aiosqlite.connect(_db_path) as db:
         async with db.execute("SELECT port FROM inbounds") as cur:
