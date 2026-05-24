@@ -151,13 +151,31 @@ async def cb_issue_link(callback: types.CallbackQuery):
     await callback.answer("Создаю ссылку...")
     await callback.message.edit_reply_markup(reply_markup=None)
 
-    existing = await db.get_user_inbound(target_id)
-    if existing:
-        await _deliver_link(target_id, existing)
+    # Check if already issued (new or old system)
+    existing_client = await db.get_user_client(target_id)
+    if existing_client:
+        await _deliver_sub_link(target_id, existing_client["sub_id"])
+        await callback.message.answer(f"Подписка уже была — отправил повторно пользователю {target_id}.")
+        return
+    existing_inbound = await db.get_user_inbound(target_id)
+    if existing_inbound:
+        await _deliver_link(target_id, existing_inbound)
         await callback.message.answer(f"Ссылка уже была — отправил повторно пользователю {target_id}.")
         return
 
     try:
+        used, errors = await _issue_via_locations(target_id, admin_id)
+
+        if used:
+            client = await db.get_user_client(target_id)
+            await _deliver_sub_link(target_id, client["sub_id"])
+            msg = f"Подписка выдана пользователю {target_id}. Выдано тобой: {issued + 1}/{ADMIN_LINK_LIMIT}."
+            if errors:
+                msg += "\n⚠️ Ошибки локаций:\n" + "\n".join(errors)
+            await callback.message.answer(msg)
+            return
+
+        # Fallback: no locations configured — old individual inbound flow
         port = await _pick_free_port()
         client_uuid = str(uuid.uuid4())
         sub_id = _gen_sub_id()
@@ -201,6 +219,61 @@ async def cb_issue_link(callback: types.CallbackQuery):
     except Exception:
         logger.exception("Unexpected error issuing link for %s", target_id)
         await callback.message.answer("Непредвиденная ошибка.")
+
+
+async def _issue_via_locations(target_id: int, issuer_id: int) -> tuple[bool, list[str]]:
+    """Add user as client to all registered locations.
+
+    Returns (success, list_of_error_strings).
+    success=False means no locations are registered — caller should fall back to old flow.
+    """
+    locations = await db.list_locations()
+    if not locations:
+        return False, []
+
+    client = await db.get_user_client(target_id)
+    if not client:
+        client_uuid = str(uuid.uuid4())
+        sub_id = _gen_sub_id()
+        email = f"tg_{target_id}"
+        await db.save_user_client(target_id, client_uuid, sub_id, email)
+        client = {"client_uuid": client_uuid, "sub_id": sub_id, "email": email}
+
+    existing = await db.get_user_locations(target_id)
+    errors: list[str] = []
+    for loc in locations:
+        if loc["inbound_id"] in existing:
+            continue
+        try:
+            await panel.add_client_to_inbound(
+                inbound_id=loc["inbound_id"],
+                client_uuid=client["client_uuid"],
+                email=client["email"],
+                sub_id=client["sub_id"],
+            )
+            await db.mark_user_in_location(target_id, loc["inbound_id"])
+        except PanelError as e:
+            errors.append(f"{loc['name']}: {e}")
+
+    await db.approve_user(target_id)
+    return True, errors
+
+
+async def _deliver_sub_link(user_id: int, sub_id: str) -> None:
+    sub_link = PanelClient.build_sub_link(
+        panel_base_url=config.panel_url,
+        sub_port=2096,
+        sub_id=sub_id,
+    )
+    try:
+        await bot.send_message(
+            user_id,
+            f"Твоя VPN-подписка готова!\n\n<u>{sub_link}</u>\n\n"
+            "Импортируй в Happ / Hiddify — все серверы подтянутся автоматически.",
+            parse_mode="HTML",
+        )
+    except Exception as e:
+        logger.error("Cannot deliver sub link to %s: %s", user_id, e)
 
 
 async def _deliver_link(user_id: int, record: dict) -> None:
@@ -331,21 +404,27 @@ async def cmd_sub(message: types.Message):
         await message.answer("У тебя нет доступа. Обратись к администратору.")
         return
 
-    record = await db.get_user_inbound(uid)
-    if not record:
-        await message.answer("У тебя ещё нет сервера. Используй /getlink чтобы создать.")
+    client = await db.get_user_client(uid)
+    sub_id = client["sub_id"] if client else None
+
+    if not sub_id:
+        record = await db.get_user_inbound(uid)
+        sub_id = record["sub_id"] if record else None
+
+    if not sub_id:
+        await message.answer("У тебя ещё нет сервера. Обратись к администратору.")
         return
 
     sub_link = PanelClient.build_sub_link(
         panel_base_url=config.panel_url,
         sub_port=2096,
-        sub_id=record["sub_id"],
+        sub_id=sub_id,
     )
 
     await message.answer(
-        f"Твоя ссылка-подписка:\n\n`{sub_link}`\n\n"
+        f"Твоя ссылка-подписка:\n\n<u>{sub_link}</u>\n\n"
         "Импортируй в Happ / Hiddify — все серверы подтянутся автоматически.",
-        parse_mode="Markdown",
+        parse_mode="HTML",
     )
 
 
@@ -488,6 +567,116 @@ async def cmd_reissue_all(message: types.Message):
     await message.answer(
         f"Готово. Отправлено: {ok}, ошибок: {fail}."
     )
+
+
+@dp.message(Command("addlocation"))
+async def cmd_addlocation(message: types.Message):
+    if not is_admin(message.from_user.id):
+        return
+    parts = message.text.split(maxsplit=2)
+    if len(parts) < 3 or not parts[1].isdigit():
+        await message.answer("Использование: /addlocation <inbound_id> <название>")
+        return
+    inbound_id = int(parts[1])
+    name = parts[2]
+    await db.add_location(inbound_id, name)
+    await message.answer(f"Локация <b>{name}</b> (inbound {inbound_id}) добавлена.", parse_mode="HTML")
+
+
+@dp.message(Command("removelocation"))
+async def cmd_removelocation(message: types.Message):
+    if not is_admin(message.from_user.id):
+        return
+    parts = message.text.split()
+    if len(parts) != 2 or not parts[1].isdigit():
+        await message.answer("Использование: /removelocation <inbound_id>")
+        return
+    inbound_id = int(parts[1])
+    ok = await db.remove_location(inbound_id)
+    if ok:
+        await message.answer(f"Локация {inbound_id} удалена.")
+    else:
+        await message.answer(f"Локация {inbound_id} не найдена.")
+
+
+@dp.message(Command("locations"))
+async def cmd_locations(message: types.Message):
+    if not is_admin(message.from_user.id):
+        return
+    locs = await db.list_locations()
+    if not locs:
+        await message.answer("Локаций нет. Добавь: /addlocation <inbound_id> <название>")
+        return
+    lines = ["<b>Локации:</b>"]
+    for loc in locs:
+        lines.append(f"• <code>{loc['inbound_id']}</code> — {loc['name']}")
+    await message.answer("\n".join(lines), parse_mode="HTML")
+
+
+@dp.message(Command("migrateall"))
+async def cmd_migrateall(message: types.Message):
+    if not is_admin(message.from_user.id):
+        return
+
+    locations = await db.list_locations()
+    if not locations:
+        await message.answer("Нет зарегистрированных локаций. Сначала /addlocation.")
+        return
+
+    users = await db.get_users_for_migration()
+    if not users:
+        await message.answer("Нет одобренных пользователей с credentials для миграции.")
+        return
+
+    await message.answer(f"Начинаю миграцию {len(users)} пользователей в {len(locations)} локаций...")
+
+    ok_count = 0
+    skip_count = 0
+    fail_lines: list[str] = []
+
+    for user in users:
+        if not user["sub_id"]:
+            skip_count += 1
+            fail_lines.append(f"⚠️ {user['telegram_id']} — пустой sub_id, пропущен")
+            continue
+
+        # Ensure user_clients has a record (for old-system users)
+        if not await db.get_user_client(user["telegram_id"]):
+            await db.save_user_client(
+                user["telegram_id"],
+                user["client_uuid"],
+                user["sub_id"],
+                user["email"],
+            )
+
+        existing = await db.get_user_locations(user["telegram_id"])
+        user_errors: list[str] = []
+
+        for loc in locations:
+            if loc["inbound_id"] in existing:
+                continue
+            try:
+                await panel.add_client_to_inbound(
+                    inbound_id=loc["inbound_id"],
+                    client_uuid=user["client_uuid"],
+                    email=user["email"],
+                    sub_id=user["sub_id"],
+                )
+                await db.mark_user_in_location(user["telegram_id"], loc["inbound_id"])
+            except PanelError as e:
+                user_errors.append(f"{loc['name']}: {e}")
+
+        if user_errors:
+            fail_lines.append(f"❌ {user['telegram_id']}: " + ", ".join(user_errors))
+        else:
+            ok_count += 1
+
+    report = [f"Миграция завершена: ✅ {ok_count} / {len(users)} пользователей"]
+    if skip_count:
+        report.append(f"Пропущено (пустой sub_id): {skip_count}")
+    if fail_lines:
+        report.append("\n".join(fail_lines[:20]))
+    await message.answer("\n".join(report), parse_mode="HTML")
 
 
 @dp.message(Command("addmod"))

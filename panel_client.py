@@ -170,6 +170,15 @@ class PanelClient:
             resp = await session.post(url, data=self._to_form(payload), headers=headers)
             return await self._parse_response(resp, f"POST {path}")
 
+    async def _post_json(self, path: str, payload: Any) -> Any:
+        url = f"{self._base_url}{self._api_prefix}{path}"
+        headers = {"X-Requested-With": "XMLHttpRequest"}
+        async with self._session() as session:
+            await self._login(session)
+            logger.info("POST JSON %s", url)
+            resp = await session.post(url, json=payload, headers=headers)
+            return await self._parse_response(resp, f"POST {path}")
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -234,6 +243,29 @@ class PanelClient:
 
     async def delete_inbound(self, inbound_id: int) -> None:
         await self._post(f"/inbounds/del/{inbound_id}", {})
+
+    async def add_client_to_inbound(
+        self,
+        inbound_id: int,
+        client_uuid: str,
+        email: str,
+        sub_id: str,
+    ) -> None:
+        settings = json.dumps({
+            "clients": [{
+                "id": client_uuid,
+                "flow": "xtls-rprx-vision",
+                "email": email,
+                "limitIp": 0,
+                "totalGB": 0,
+                "expiryTime": 0,
+                "enable": True,
+                "tgId": "",
+                "subId": sub_id,
+                "reset": 0,
+            }]
+        })
+        await self._post_json("/inbounds/addClient", {"id": inbound_id, "settings": settings})
 
     # ------------------------------------------------------------------
     # VLESS link builder

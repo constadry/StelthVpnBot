@@ -59,6 +59,33 @@ async def init_db() -> None:
             )
         """)
 
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS locations (
+                inbound_id  INTEGER PRIMARY KEY,
+                name        TEXT NOT NULL,
+                created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+        """)
+
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS user_clients (
+                telegram_id  INTEGER PRIMARY KEY REFERENCES users(telegram_id),
+                client_uuid  TEXT NOT NULL,
+                sub_id       TEXT NOT NULL,
+                email        TEXT NOT NULL,
+                created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+        """)
+
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS user_locations (
+                telegram_id  INTEGER NOT NULL,
+                inbound_id   INTEGER NOT NULL,
+                added_at     TEXT NOT NULL DEFAULT (datetime('now')),
+                PRIMARY KEY (telegram_id, inbound_id)
+            )
+        """)
+
         # Migrations for columns added after initial release
         for migration in [
             "ALTER TABLE inbounds ADD COLUMN sub_id TEXT NOT NULL DEFAULT ''",
@@ -275,3 +302,100 @@ async def get_used_ports() -> set[int]:
         async with db.execute("SELECT port FROM inbounds") as cur:
             rows = await cur.fetchall()
             return {r[0] for r in rows}
+
+
+# ---------------------------------------------------------------------------
+# Locations (shared inbounds)
+# ---------------------------------------------------------------------------
+
+async def add_location(inbound_id: int, name: str) -> None:
+    async with aiosqlite.connect(_db_path) as db:
+        await db.execute(
+            "INSERT OR REPLACE INTO locations (inbound_id, name) VALUES (?, ?)",
+            (inbound_id, name),
+        )
+        await db.commit()
+
+
+async def remove_location(inbound_id: int) -> bool:
+    async with aiosqlite.connect(_db_path) as db:
+        async with db.execute(
+            "SELECT inbound_id FROM locations WHERE inbound_id = ?", (inbound_id,)
+        ) as cur:
+            if not await cur.fetchone():
+                return False
+        await db.execute("DELETE FROM locations WHERE inbound_id = ?", (inbound_id,))
+        await db.commit()
+        return True
+
+
+async def list_locations() -> list[dict]:
+    async with aiosqlite.connect(_db_path) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT inbound_id, name, created_at FROM locations ORDER BY created_at ASC"
+        ) as cur:
+            rows = await cur.fetchall()
+            return [dict(r) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# User clients (new subscription system)
+# ---------------------------------------------------------------------------
+
+async def save_user_client(
+    telegram_id: int, client_uuid: str, sub_id: str, email: str
+) -> None:
+    async with aiosqlite.connect(_db_path) as db:
+        await db.execute("""
+            INSERT OR REPLACE INTO user_clients (telegram_id, client_uuid, sub_id, email)
+            VALUES (?, ?, ?, ?)
+        """, (telegram_id, client_uuid, sub_id, email))
+        await db.commit()
+
+
+async def get_user_client(telegram_id: int) -> Optional[dict]:
+    async with aiosqlite.connect(_db_path) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT * FROM user_clients WHERE telegram_id = ?", (telegram_id,)
+        ) as cur:
+            row = await cur.fetchone()
+            return dict(row) if row else None
+
+
+async def mark_user_in_location(telegram_id: int, inbound_id: int) -> None:
+    async with aiosqlite.connect(_db_path) as db:
+        await db.execute(
+            "INSERT OR IGNORE INTO user_locations (telegram_id, inbound_id) VALUES (?, ?)",
+            (telegram_id, inbound_id),
+        )
+        await db.commit()
+
+
+async def get_user_locations(telegram_id: int) -> set[int]:
+    async with aiosqlite.connect(_db_path) as db:
+        async with db.execute(
+            "SELECT inbound_id FROM user_locations WHERE telegram_id = ?", (telegram_id,)
+        ) as cur:
+            rows = await cur.fetchall()
+            return {r[0] for r in rows}
+
+
+async def get_users_for_migration() -> list[dict]:
+    """Approved users with credentials from old or new system (for /migrateall)."""
+    async with aiosqlite.connect(_db_path) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("""
+            SELECT u.telegram_id, u.username,
+                   COALESCE(uc.client_uuid, i.client_uuid) AS client_uuid,
+                   COALESCE(uc.sub_id,      i.sub_id)      AS sub_id,
+                   COALESCE(uc.email, 'tg_' || u.telegram_id) AS email
+            FROM users u
+            LEFT JOIN user_clients uc ON uc.telegram_id = u.telegram_id
+            LEFT JOIN inbounds     i  ON i.telegram_id  = u.telegram_id
+            WHERE u.approved = 1
+              AND (uc.client_uuid IS NOT NULL OR i.client_uuid IS NOT NULL)
+        """) as cur:
+            rows = await cur.fetchall()
+            return [dict(r) for r in rows]

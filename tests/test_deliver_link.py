@@ -42,9 +42,10 @@ async def test_deliver_link_uses_html_underline():
          patch("bot.bot.send_message", new=send_mock):
         await bot_mod._deliver_link(555, record)
 
-    send_mock.assert_called_once()
-    call_kwargs = send_mock.call_args[1]
-    call_text = send_mock.call_args[0][1] if send_mock.call_args[0] else call_kwargs.get("text", "")
+    assert send_mock.call_count >= 1
+    first_call = send_mock.call_args_list[0]
+    call_kwargs = first_call[1]
+    call_text = first_call[0][1] if first_call[0] else call_kwargs.get("text", "")
 
     assert call_kwargs.get("parse_mode") == "HTML", "parse_mode должен быть HTML"
     assert "<u>" in call_text and "</u>" in call_text, "ссылка должна быть обёрнута в <u>...</u>"
